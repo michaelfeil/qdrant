@@ -18,6 +18,7 @@ use rand::thread_rng;
 use rayon::prelude::*;
 use rayon::ThreadPool;
 
+use super::gpu::get_gpu_min_points_count;
 use super::graph_links::{GraphLinks, GraphLinksMmap};
 use crate::common::operation_error::{check_process_stopped, OperationError, OperationResult};
 use crate::common::operation_time_statistics::{
@@ -29,6 +30,10 @@ use crate::data_types::vectors::{QueryVector, Vector, VectorRef};
 use crate::id_tracker::IdTrackerSS;
 use crate::index::hnsw_index::build_condition_checker::BuildConditionChecker;
 use crate::index::hnsw_index::config::HnswGraphConfig;
+use crate::index::hnsw_index::gpu::gpu_graph_builder::build_hnsw_on_gpu;
+use crate::index::hnsw_index::gpu::{
+    get_gpu_force_half_precision, get_gpu_indexing, get_gpu_max_groups,
+};
 use crate::index::hnsw_index::graph_layers::GraphLayers;
 use crate::index::hnsw_index::graph_layers_builder::GraphLayersBuilder;
 use crate::index::hnsw_index::point_scorer::FilteredScorer;
@@ -37,6 +42,7 @@ use crate::index::sample_estimation::sample_check_cardinality;
 use crate::index::struct_payload_index::StructPayloadIndex;
 use crate::index::visited_pool::{VisitedListHandle, VisitedPool};
 use crate::index::{PayloadIndex, VectorIndex};
+use crate::payload_storage::FilterContext;
 use crate::telemetry::VectorIndexSearchesTelemetry;
 use crate::types::Condition::Field;
 use crate::types::{
@@ -233,20 +239,22 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
         let mut rng = thread_rng();
         let deleted_bitslice = vector_storage.deleted_vector_bitslice();
 
+        // TODO(gpu): log device name
         debug!("building HNSW for {total_vector_count} vectors with {num_cpus} CPUs");
 
+        let num_entries = std::cmp::max(
+            1,
+            total_vector_count
+                .checked_div(full_scan_threshold)
+                .unwrap_or(0)
+                * 10,
+        );
         let mut graph_layers_builder = GraphLayersBuilder::new(
             total_vector_count,
             config.m,
             config.m0,
             config.ef_construct,
-            std::cmp::max(
-                1,
-                total_vector_count
-                    .checked_div(full_scan_threshold)
-                    .unwrap_or(0)
-                    * 10,
-            ),
+            num_entries,
             HNSW_USE_HEURISTIC,
         );
 
@@ -285,45 +293,95 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
         let mut indexed_vectors = 0;
 
         if config.m > 0 {
-            let mut ids_iterator = id_tracker.iter_ids_excluding(deleted_bitslice);
+            let timer = std::time::Instant::now();
 
-            let first_few_ids: Vec<_> = ids_iterator
-                .by_ref()
-                .take(SINGLE_THREADED_HNSW_BUILD_THRESHOLD)
-                .collect();
-            let ids: Vec<_> = ids_iterator.collect();
+            let use_gpu = total_vector_count > get_gpu_min_points_count() && get_gpu_indexing();
+            let gpu_constructed_graph = if use_gpu {
+                let ids: Vec<_> = id_tracker.iter_ids_excluding(deleted_bitslice).collect();
+                indexed_vectors = ids.len();
 
-            indexed_vectors = ids.len() + first_few_ids.len();
+                let points_scorer_builder = |vector_id| {
+                    let vector = vector_storage.get_vector(vector_id);
+                    let vector = vector.as_vec_ref().into();
+                    let raw_scorer = if let Some(quantized_storage) = quantized_vectors.as_ref() {
+                        quantized_storage.raw_scorer(
+                            vector,
+                            id_tracker.deleted_point_bitslice(),
+                            vector_storage.deleted_vector_bitslice(),
+                            stopped,
+                        )
+                    } else {
+                        new_raw_scorer(vector, &vector_storage, id_tracker.deleted_point_bitslice())
+                    }?;
+                    Ok((raw_scorer, None))
+                };
 
-            let insert_point = |vector_id| {
-                check_process_stopped(stopped)?;
-                let vector = vector_storage.get_vector(vector_id);
-                let vector = vector.as_vec_ref().into();
-                let raw_scorer = if let Some(quantized_storage) = quantized_vectors.as_ref() {
-                    quantized_storage.raw_scorer(
-                        vector,
-                        id_tracker.deleted_point_bitslice(),
-                        vector_storage.deleted_vector_bitslice(),
-                        stopped,
-                    )
-                } else {
-                    new_raw_scorer(vector, vector_storage, id_tracker.deleted_point_bitslice())
-                }?;
-                let points_scorer = FilteredScorer::new(raw_scorer.as_ref(), None);
-
-                graph_layers_builder.link_new_point(vector_id, points_scorer);
-                Ok::<_, OperationError>(())
+                Some(build_hnsw_on_gpu(
+                    false, // TODO(gpu): provide device instead of bool
+                    &pool,
+                    &graph_layers_builder,
+                    None,
+                    get_gpu_max_groups(),
+                    &vector_storage,
+                    quantized_vectors.as_ref(),
+                    num_entries,
+                    get_gpu_force_half_precision(),
+                    SINGLE_THREADED_HNSW_BUILD_THRESHOLD,
+                    false,
+                    ids,
+                    points_scorer_builder,
+                ))
+            } else {
+                None
             };
 
-            for vector_id in first_few_ids {
-                insert_point(vector_id)?;
+            if let Some(Err(gpu_error)) = &gpu_constructed_graph {
+                log::warn!("Failed to build HNSW on GPU: {gpu_error}. Falling back to CPU.");
             }
 
-            if !ids.is_empty() {
-                pool.install(|| ids.into_par_iter().try_for_each(insert_point))?;
+            if let Some(Ok(gpu_graph)) = gpu_constructed_graph {
+                graph_layers_builder = gpu_graph;
+            } else {
+                let mut ids_iterator = id_tracker.iter_ids_excluding(deleted_bitslice);
+
+                let first_few_ids: Vec<_> = ids_iterator
+                    .by_ref()
+                    .take(SINGLE_THREADED_HNSW_BUILD_THRESHOLD)
+                    .collect();
+                let ids: Vec<_> = ids_iterator.collect();
+
+                indexed_vectors = ids.len() + first_few_ids.len();
+
+                let insert_point = |vector_id| {
+                    check_process_stopped(stopped)?;
+                    let vector = vector_storage.get_vector(vector_id);
+                    let vector = vector.as_vec_ref().into();
+                    let raw_scorer = if let Some(quantized_storage) = quantized_vectors.as_ref() {
+                        quantized_storage.raw_scorer(
+                            vector,
+                            id_tracker.deleted_point_bitslice(),
+                            vector_storage.deleted_vector_bitslice(),
+                            stopped,
+                        )
+                    } else {
+                        new_raw_scorer(vector, &vector_storage, id_tracker.deleted_point_bitslice())
+                    }?;
+                    let points_scorer = FilteredScorer::new(raw_scorer.as_ref(), None);
+
+                    graph_layers_builder.link_new_point(vector_id, points_scorer);
+                    Ok::<_, OperationError>(())
+                };
+
+                for vector_id in first_few_ids {
+                    insert_point(vector_id)?;
+                }
+
+                if !ids.is_empty() {
+                    pool.install(|| ids.into_par_iter().try_for_each(insert_point))?;
+                }
             }
 
-            debug!("finish main graph");
+            debug!("finish main graph in time {:?}", timer.elapsed());
         } else {
             debug!("skip building main HNSW graph");
         }
@@ -445,6 +503,57 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
 
         for block_point_id in points_to_index.iter().copied() {
             block_filter_list.check_and_update_visited(block_point_id);
+        }
+
+        let use_gpu = points_to_index.len() > get_gpu_min_points_count() && get_gpu_indexing();
+        let gpu_constructed_graph = if use_gpu {
+            let points_scorer_builder = |block_point_id| -> OperationResult<_> {
+                let vector = vector_storage.get_vector(block_point_id);
+                let vector = vector.as_vec_ref().into();
+                let raw_scorer = match quantized_vectors.as_ref() {
+                    Some(quantized_storage) => quantized_storage.raw_scorer(
+                        vector,
+                        id_tracker.deleted_point_bitslice(),
+                        deleted_bitslice,
+                        stopped,
+                    ),
+                    None => {
+                        new_raw_scorer(vector, vector_storage, id_tracker.deleted_point_bitslice())
+                    }
+                }?;
+                let block_condition_checker: Box<dyn FilterContext> =
+                    Box::new(BuildConditionChecker {
+                        filter_list: block_filter_list,
+                        current_point: block_point_id,
+                    });
+                Ok((raw_scorer, Some(block_condition_checker)))
+            };
+            Some(build_hnsw_on_gpu(
+                false, // TODO(gpu): provide device instead of bool
+                &pool,
+                &graph_layers_builder,
+                None,
+                get_gpu_max_groups(),
+                &vector_storage,
+                quantized_vectors.as_ref(),
+                1,
+                get_gpu_force_half_precision(),
+                SINGLE_THREADED_HNSW_BUILD_THRESHOLD,
+                false,
+                points_to_index.clone(),
+                points_scorer_builder,
+            ))
+        } else {
+            None
+        };
+
+        if let Some(Err(gpu_error)) = &gpu_constructed_graph {
+            log::warn!("Failed to build HNSW on GPU: {gpu_error}. Falling back to CPU.");
+        }
+
+        if let Some(Ok(gpu_graph)) = gpu_constructed_graph {
+            *graph_layers_builder = gpu_graph;
+            return Ok(());
         }
 
         let insert_points = |block_point_id| {

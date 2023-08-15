@@ -150,6 +150,16 @@ fn main() -> anyhow::Result<()> {
 
     memory::madvise::set_global(settings.storage.mmap_advice);
     segment::vector_storage::common::set_async_scorer(settings.storage.async_scorer);
+    if let Some(settings_gpu) = &settings.gpu {
+        segment::index::hnsw_index::gpu::set_gpu_indexing(settings_gpu.indexing);
+        segment::index::hnsw_index::gpu::set_gpu_force_half_precision(
+            settings_gpu.force_half_precision,
+        );
+        segment::index::hnsw_index::gpu::set_gpu_max_groups(settings_gpu.max_groups);
+        segment::index::hnsw_index::gpu::set_device_index(settings_gpu.device_index);
+        segment::index::hnsw_index::gpu::set_devices_count(settings_gpu.devices_count);
+        segment::index::hnsw_index::gpu::set_device_filter(&settings_gpu.device_filter);
+    }
 
     welcome(&settings);
 
