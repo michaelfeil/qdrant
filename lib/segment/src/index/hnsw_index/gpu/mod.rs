@@ -1,5 +1,6 @@
 pub mod batched_points;
 pub mod cpu_level_builder;
+pub mod devices_manager;
 pub mod gpu_candidates_heap;
 pub mod gpu_graph_builder;
 pub mod gpu_level_builder;
@@ -15,6 +16,7 @@ use std::sync::Arc;
 
 use batched_points::BatchedPoints;
 use bitvec::vec::BitVec;
+use devices_manager::DevicesMaganer;
 use lazy_static::lazy_static;
 use parking_lot::{Mutex, RwLock};
 
@@ -25,6 +27,7 @@ lazy_static! {
     static ref GPU_INSTANCE: OperationResult<Arc<gpu::Instance>> = create_gpu_instance();
     static ref GPU_DEVICE: OperationResult<Arc<gpu::Device>> = create_gpu_device();
     static ref GPU_DEVICE_FILER: Mutex<String> = Mutex::new("".to_string());
+    static ref GPU_DEVICES_MANAGER: OperationResult<DevicesMaganer> = init_devices_manager();
 }
 
 static GPU_INDEXING: AtomicBool = AtomicBool::new(false);
@@ -39,6 +42,14 @@ fn create_gpu_instance() -> OperationResult<Arc<gpu::Instance>> {
             OperationError::service_error(format!("Failed to create GPU instance: {:?}", e))
         })?,
     ))
+}
+
+fn init_devices_manager() -> OperationResult<DevicesMaganer> {
+    let instance = GPU_INSTANCE.clone()?;
+    let filter = GPU_DEVICE_FILER.lock().clone();
+    // TODO(gpu): add start index and count
+    let devices_manager = DevicesMaganer::new(instance, &filter, 0, usize::MAX)?;
+    Ok(devices_manager)
 }
 
 fn create_gpu_device() -> OperationResult<Arc<gpu::Device>> {

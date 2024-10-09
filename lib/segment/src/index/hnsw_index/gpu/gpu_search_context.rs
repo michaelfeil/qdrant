@@ -10,7 +10,7 @@ use super::gpu_vector_storage::GpuVectorStorage;
 use super::gpu_visited_flags::GpuVisitedFlags;
 use crate::common::operation_error::{OperationError, OperationResult};
 use crate::index::hnsw_index::gpu::shader_builder::ShaderBuilder;
-use crate::index::hnsw_index::gpu::{GPU_DEVICE, GPU_INSTANCE};
+use crate::index::hnsw_index::gpu::GPU_DEVICES_MANAGER;
 use crate::index::hnsw_index::graph_layers_builder::GraphLayersBuilder;
 use crate::vector_storage::quantized::quantized_vectors::QuantizedVectors;
 use crate::vector_storage::{VectorStorage, VectorStorageEnum};
@@ -96,16 +96,27 @@ impl GpuSearchContext {
         force_half_precision: bool,
         exact: bool,
     ) -> OperationResult<Self> {
-        let (_instance, device) = if create_new_device {
+        let mut device = None;
+        if create_new_device {
+            device = GPU_DEVICES_MANAGER
+                .as_ref()
+                .map_err(Clone::clone)?
+                .lock_device();
+        }
+
+        let mut device = device.map(|locked_device| locked_device.locked_device.clone());
+
+        if !create_new_device {
             let instance = Arc::new(gpu::Instance::new("qdrant", debug_messenger, false).unwrap());
-            let device = Arc::new(
+            device = Some(Arc::new(
                 gpu::Device::new(instance.clone(), instance.vk_physical_devices[0].clone())
                     .unwrap(),
-            );
-            (instance, device)
-        } else {
-            (GPU_INSTANCE.clone()?, GPU_DEVICE.clone()?)
-        };
+            ));
+        }
+
+        let device =
+            device.ok_or_else(|| OperationError::service_error("Failed to create device"))?;
+
         let points_count = vector_storage.total_vector_count();
 
         let gpu_vector_storage = GpuVectorStorage::new(
