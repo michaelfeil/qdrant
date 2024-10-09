@@ -1,29 +1,30 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::gpu_vector_storage::GpuVectorStorageElementType;
+use super::gpu_vector_storage::{GpuVectorStorage, GpuVectorStorageElementType};
 use crate::types::Distance;
 
-pub struct ShaderBuilder {
+pub struct ShaderBuilder<'a> {
     device: Arc<gpu::Device>,
     shader_code: String,
-    element_type: Option<GpuVectorStorageElementType>,
-    distance: Option<Distance>,
-    sq_multiplier: Option<f32>,
-    sq_diff: Option<f32>,
+//    element_type: Option<GpuVectorStorageElementType>,
+//    distance: Option<Distance>,
+//    sq_multiplier: Option<f32>,
+//    sq_diff: Option<f32>,
     exact: Option<bool>,
-    dim: Option<usize>,
-    storages_count: Option<usize>,
-    storage_size: Option<usize>,
+//    dim: Option<usize>,
+//    storages_count: Option<usize>,
+//    storage_size: Option<usize>,
     nearest_heap_ef: Option<usize>,
     nearest_heap_capacity: Option<usize>,
     candidates_heap_capacity: Option<usize>,
     links_capacity: Option<usize>,
     visited_flags_capacity: Option<usize>,
     shaders_map: HashMap<String, String>,
+    gpu_vector_storage: Option<&'a GpuVectorStorage>,
 }
 
-impl ShaderBuilder {
+impl<'a> ShaderBuilder<'a> {
     pub fn new(device: Arc<gpu::Device>) -> Self {
         let shaders_map = HashMap::from([
             (
@@ -103,19 +104,13 @@ impl ShaderBuilder {
         Self {
             device,
             shader_code: Default::default(),
-            element_type: None,
-            distance: None,
-            sq_multiplier: None,
-            sq_diff: None,
             exact: None,
-            dim: None,
-            storages_count: None,
-            storage_size: None,
             nearest_heap_ef: None,
             nearest_heap_capacity: None,
             candidates_heap_capacity: None,
             links_capacity: None,
             visited_flags_capacity: None,
+            gpu_vector_storage: None,
             shaders_map,
         }
     }
@@ -126,43 +121,13 @@ impl ShaderBuilder {
         self
     }
 
-    pub fn with_element_type(&mut self, element_type: GpuVectorStorageElementType) -> &mut Self {
-        self.element_type = Some(element_type);
-        self
-    }
-
-    pub fn with_distance(&mut self, distance: Distance) -> &mut Self {
-        self.distance = Some(distance);
-        self
-    }
-
-    pub fn with_sq_multiplier(&mut self, sq_multiplier: Option<f32>) -> &mut Self {
-        self.sq_multiplier = sq_multiplier;
-        self
-    }
-
-    pub fn with_sq_diff(&mut self, sq_diff: Option<f32>) -> &mut Self {
-        self.sq_diff = sq_diff;
+    pub fn with_gpu_vector_storage(&mut self, gpu_vector_storage: &'a GpuVectorStorage) -> &mut Self {
+        self.gpu_vector_storage = Some(gpu_vector_storage);
         self
     }
 
     pub fn with_exact(&mut self, exact: bool) -> &mut Self {
         self.exact = Some(exact);
-        self
-    }
-
-    pub fn with_dim(&mut self, dim: usize) -> &mut Self {
-        self.dim = Some(dim);
-        self
-    }
-
-    pub fn with_storages_count(&mut self, storages_count: usize) -> &mut Self {
-        self.storages_count = Some(storages_count);
-        self
-    }
-
-    pub fn with_storage_size(&mut self, storage_size: usize) -> &mut Self {
-        self.storage_size = Some(storage_size);
         self
     }
 
@@ -205,8 +170,8 @@ impl ShaderBuilder {
             Some(&self.device.subgroup_size().to_string()),
         );
 
-        if let Some(element_type) = self.element_type {
-            match element_type {
+        if let Some(gpu_vector_storage) = self.gpu_vector_storage {
+            match gpu_vector_storage.element_type {
                 GpuVectorStorageElementType::Float32 => {
                     options.add_macro_definition("VECTOR_STORAGE_ELEMENT_FLOAT32", None)
                 }
@@ -223,39 +188,30 @@ impl ShaderBuilder {
                     options.add_macro_definition("VECTOR_STORAGE_ELEMENT_SQ", None)
                 }
             }
-        }
 
-        if let Some(distance) = self.distance {
-            match distance {
+            match gpu_vector_storage.distance {
                 Distance::Cosine => options.add_macro_definition("COSINE_DISTANCE", None),
                 Distance::Euclid => options.add_macro_definition("EUCLID_DISTANCE", None),
                 Distance::Dot => options.add_macro_definition("DOT_DISTANCE", None),
                 Distance::Manhattan => options.add_macro_definition("MANHATTAN_DISTANCE", None),
             }
-        }
 
-        if let Some(sq_multiplier) = self.sq_multiplier {
-            options.add_macro_definition("SQ_MULTIPLIER", Some(&sq_multiplier.to_string()));
-        }
+            if let Some(sq_multiplier) = gpu_vector_storage.sq_multiplier {
+                options.add_macro_definition("SQ_MULTIPLIER", Some(&sq_multiplier.to_string()));
+            }
+    
+            if let Some(sq_diff) = gpu_vector_storage.sq_diff {
+                options.add_macro_definition("SQ_DIFF", Some(&sq_diff.to_string()));
+            }
 
-        if let Some(sq_diff) = self.sq_diff {
-            options.add_macro_definition("SQ_DIFF", Some(&sq_diff.to_string()));
+            options.add_macro_definition("DIM", Some(&gpu_vector_storage.dim.to_string()));
+
+            // options.add_macro_definition("STORAGES_COUNT", Some(&gpu_vector_storage.storages_count.to_string()));
+            // options.add_macro_definition("STORAGE_SIZE", Some(&gpu_vector_storage.storage_size.to_string()));
         }
 
         if self.exact == Some(true) {
             options.add_macro_definition("EXACT", None);
-        }
-
-        if let Some(dim) = self.dim {
-            options.add_macro_definition("DIM", Some(&dim.to_string()));
-        }
-
-        if let Some(storages_count) = self.storages_count {
-            options.add_macro_definition("STORAGES_COUNT", Some(&storages_count.to_string()));
-        }
-
-        if let Some(storage_size) = self.storage_size {
-            options.add_macro_definition("STORAGE_SIZE", Some(&storage_size.to_string()));
         }
 
         if let Some(nearest_heap_ef) = self.nearest_heap_ef {

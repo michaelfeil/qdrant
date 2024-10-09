@@ -686,11 +686,7 @@ mod tests {
 
         let shader = ShaderBuilder::new(device.clone())
             .with_shader_code(include_str!("shaders/tests/test_vector_storage.comp"))
-            .with_element_type(gpu_vector_storage.element_type)
-            .with_distance(gpu_vector_storage.distance)
-            .with_sq_multiplier(gpu_vector_storage.sq_multiplier)
-            .with_sq_diff(gpu_vector_storage.sq_diff)
-            .with_dim(gpu_vector_storage.dim)
+            .with_gpu_vector_storage(&gpu_vector_storage)
             .build();
 
         let pipeline = gpu::Pipeline::builder()
@@ -853,11 +849,7 @@ mod tests {
 
         let shader = ShaderBuilder::new(device.clone())
             .with_shader_code(include_str!("shaders/tests/test_vector_storage.comp"))
-            .with_element_type(gpu_vector_storage.element_type)
-            .with_distance(gpu_vector_storage.distance)
-            .with_sq_multiplier(gpu_vector_storage.sq_multiplier)
-            .with_sq_diff(gpu_vector_storage.sq_diff)
-            .with_dim(gpu_vector_storage.dim)
+            .with_gpu_vector_storage(&gpu_vector_storage)
             .build();
 
         let pipeline = gpu::Pipeline::builder()
@@ -993,11 +985,7 @@ mod tests {
 
         let shader = ShaderBuilder::new(device.clone())
             .with_shader_code(include_str!("shaders/tests/test_vector_storage.comp"))
-            .with_element_type(gpu_vector_storage.element_type)
-            .with_distance(gpu_vector_storage.distance)
-            .with_sq_multiplier(gpu_vector_storage.sq_multiplier)
-            .with_sq_diff(gpu_vector_storage.sq_diff)
-            .with_dim(gpu_vector_storage.dim)
+            .with_gpu_vector_storage(&gpu_vector_storage)
             .build();
 
         let pipeline = gpu::Pipeline::builder()
