@@ -18,6 +18,7 @@ use rand::thread_rng;
 use rayon::prelude::*;
 use rayon::ThreadPool;
 
+use super::gpu::devices_manager::LockedDevice;
 use super::gpu::get_gpu_min_points_count;
 use super::graph_links::{GraphLinks, GraphLinksMmap};
 use crate::common::operation_error::{check_process_stopped, OperationError, OperationResult};
@@ -258,6 +259,12 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
             HNSW_USE_HEURISTIC,
         );
 
+        let gpu_device = crate::index::hnsw_index::gpu::GPU_DEVICES_MANAGER
+            .as_ref()
+            .map(|device_manager| device_manager.lock_device())
+            .ok()
+            .flatten();
+
         let pool = rayon::ThreadPoolBuilder::new()
             .thread_name(|idx| format!("hnsw-build-{idx}"))
             .num_threads(num_cpus)
@@ -296,41 +303,49 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
             let timer = std::time::Instant::now();
 
             let use_gpu = total_vector_count > get_gpu_min_points_count() && get_gpu_indexing();
-            let gpu_constructed_graph = if use_gpu {
-                let ids: Vec<_> = id_tracker.iter_ids_excluding(deleted_bitslice).collect();
-                indexed_vectors = ids.len();
+            let gpu_constructed_graph = if let Some(gpu_device) = &gpu_device {
+                if use_gpu {
+                    let ids: Vec<_> = id_tracker.iter_ids_excluding(deleted_bitslice).collect();
+                    indexed_vectors = ids.len();
 
-                let points_scorer_builder = |vector_id| {
-                    let vector = vector_storage.get_vector(vector_id);
-                    let vector = vector.as_vec_ref().into();
-                    let raw_scorer = if let Some(quantized_storage) = quantized_vectors.as_ref() {
-                        quantized_storage.raw_scorer(
-                            vector,
-                            id_tracker.deleted_point_bitslice(),
-                            vector_storage.deleted_vector_bitslice(),
-                            stopped,
-                        )
-                    } else {
-                        new_raw_scorer(vector, &vector_storage, id_tracker.deleted_point_bitslice())
-                    }?;
-                    Ok((raw_scorer, None))
-                };
+                    let points_scorer_builder = |vector_id| {
+                        let vector = vector_storage.get_vector(vector_id);
+                        let vector = vector.as_vec_ref().into();
+                        let raw_scorer = if let Some(quantized_storage) = quantized_vectors.as_ref()
+                        {
+                            quantized_storage.raw_scorer(
+                                vector,
+                                id_tracker.deleted_point_bitslice(),
+                                vector_storage.deleted_vector_bitslice(),
+                                stopped,
+                            )
+                        } else {
+                            new_raw_scorer(
+                                vector,
+                                &vector_storage,
+                                id_tracker.deleted_point_bitslice(),
+                            )
+                        }?;
+                        Ok((raw_scorer, None))
+                    };
 
-                Some(build_hnsw_on_gpu(
-                    false, // TODO(gpu): provide device instead of bool
-                    &pool,
-                    &graph_layers_builder,
-                    None,
-                    get_gpu_max_groups(),
-                    &vector_storage,
-                    quantized_vectors.as_ref(),
-                    num_entries,
-                    get_gpu_force_half_precision(),
-                    SINGLE_THREADED_HNSW_BUILD_THRESHOLD,
-                    false,
-                    ids,
-                    points_scorer_builder,
-                ))
+                    Some(build_hnsw_on_gpu(
+                        gpu_device.locked_device.clone(),
+                        &pool,
+                        &graph_layers_builder,
+                        get_gpu_max_groups(),
+                        &vector_storage,
+                        quantized_vectors.as_ref(),
+                        num_entries,
+                        get_gpu_force_half_precision(),
+                        SINGLE_THREADED_HNSW_BUILD_THRESHOLD,
+                        false,
+                        ids,
+                        points_scorer_builder,
+                    ))
+                } else {
+                    None
+                }
             } else {
                 None
             };
@@ -434,6 +449,7 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
                         quantized_vectors,
                         payload_index,
                         &pool,
+                        &gpu_device,
                         stopped,
                         &mut additional_graph,
                         payload_block.condition,
@@ -478,6 +494,7 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
         quantized_vectors: &Option<QuantizedVectors>,
         payload_index: &StructPayloadIndex,
         pool: &ThreadPool,
+        gpu_device: &Option<LockedDevice>,
         stopped: &AtomicBool,
         graph_layers_builder: &mut GraphLayersBuilder,
         condition: FieldCondition,
@@ -506,43 +523,48 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
         }
 
         let use_gpu = points_to_index.len() > get_gpu_min_points_count() && get_gpu_indexing();
-        let gpu_constructed_graph = if use_gpu {
-            let points_scorer_builder = |block_point_id| -> OperationResult<_> {
-                let vector = vector_storage.get_vector(block_point_id);
-                let vector = vector.as_vec_ref().into();
-                let raw_scorer = match quantized_vectors.as_ref() {
-                    Some(quantized_storage) => quantized_storage.raw_scorer(
-                        vector,
-                        id_tracker.deleted_point_bitslice(),
-                        deleted_bitslice,
-                        stopped,
-                    ),
-                    None => {
-                        new_raw_scorer(vector, vector_storage, id_tracker.deleted_point_bitslice())
-                    }
-                }?;
-                let block_condition_checker: Box<dyn FilterContext> =
-                    Box::new(BuildConditionChecker {
-                        filter_list: block_filter_list,
-                        current_point: block_point_id,
-                    });
-                Ok((raw_scorer, Some(block_condition_checker)))
-            };
-            Some(build_hnsw_on_gpu(
-                false, // TODO(gpu): provide device instead of bool
-                &pool,
-                &graph_layers_builder,
-                None,
-                get_gpu_max_groups(),
-                &vector_storage,
-                quantized_vectors.as_ref(),
-                1,
-                get_gpu_force_half_precision(),
-                SINGLE_THREADED_HNSW_BUILD_THRESHOLD,
-                false,
-                points_to_index.clone(),
-                points_scorer_builder,
-            ))
+        let gpu_constructed_graph = if let Some(gpu_device) = gpu_device {
+            if use_gpu {
+                let points_scorer_builder = |block_point_id| -> OperationResult<_> {
+                    let vector = vector_storage.get_vector(block_point_id);
+                    let vector = vector.as_vec_ref().into();
+                    let raw_scorer = match quantized_vectors.as_ref() {
+                        Some(quantized_storage) => quantized_storage.raw_scorer(
+                            vector,
+                            id_tracker.deleted_point_bitslice(),
+                            deleted_bitslice,
+                            stopped,
+                        ),
+                        None => new_raw_scorer(
+                            vector,
+                            vector_storage,
+                            id_tracker.deleted_point_bitslice(),
+                        ),
+                    }?;
+                    let block_condition_checker: Box<dyn FilterContext> =
+                        Box::new(BuildConditionChecker {
+                            filter_list: block_filter_list,
+                            current_point: block_point_id,
+                        });
+                    Ok((raw_scorer, Some(block_condition_checker)))
+                };
+                Some(build_hnsw_on_gpu(
+                    gpu_device.locked_device.clone(),
+                    &pool,
+                    &graph_layers_builder,
+                    get_gpu_max_groups(),
+                    &vector_storage,
+                    quantized_vectors.as_ref(),
+                    1,
+                    get_gpu_force_half_precision(),
+                    SINGLE_THREADED_HNSW_BUILD_THRESHOLD,
+                    false,
+                    points_to_index.clone(),
+                    points_scorer_builder,
+                ))
+            } else {
+                None
+            }
         } else {
             None
         };

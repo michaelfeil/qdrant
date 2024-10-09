@@ -27,7 +27,7 @@ lazy_static! {
     static ref GPU_INSTANCE: OperationResult<Arc<gpu::Instance>> = create_gpu_instance();
     static ref GPU_DEVICE: OperationResult<Arc<gpu::Device>> = create_gpu_device();
     static ref GPU_DEVICE_FILER: Mutex<String> = Mutex::new("".to_string());
-    static ref GPU_DEVICES_MANAGER: OperationResult<DevicesMaganer> = init_devices_manager();
+    pub static ref GPU_DEVICES_MANAGER: OperationResult<DevicesMaganer> = init_devices_manager();
 }
 
 static GPU_INDEXING: AtomicBool = AtomicBool::new(false);
@@ -35,6 +35,8 @@ static GPU_FORCE_HALF_PRECISION: AtomicBool = AtomicBool::new(false);
 static GPU_MAX_GROUPS: AtomicUsize = AtomicUsize::new(GPU_MAX_GROUPS_COUNT_DEFAULT);
 pub const GPU_MAX_GROUPS_COUNT_DEFAULT: usize = 512;
 static GPU_MIN_POINTS_COUNT: AtomicUsize = AtomicUsize::new(10_000);
+static GPU_DEVICE_START_INDEX: AtomicUsize = AtomicUsize::new(0);
+static GPU_DEVICES_COUNT: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 fn create_gpu_instance() -> OperationResult<Arc<gpu::Instance>> {
     Ok(Arc::new(
@@ -48,7 +50,12 @@ fn init_devices_manager() -> OperationResult<DevicesMaganer> {
     let instance = GPU_INSTANCE.clone()?;
     let filter = GPU_DEVICE_FILER.lock().clone();
     // TODO(gpu): add start index and count
-    let devices_manager = DevicesMaganer::new(instance, &filter, 0, usize::MAX)?;
+    let devices_manager = DevicesMaganer::new(
+        instance,
+        &filter,
+        GPU_DEVICE_START_INDEX.load(Ordering::Relaxed),
+        GPU_DEVICES_COUNT.load(Ordering::Relaxed),
+    )?;
     Ok(devices_manager)
 }
 
@@ -96,9 +103,17 @@ pub fn get_gpu_max_groups() -> usize {
     GPU_MAX_GROUPS.load(Ordering::Relaxed)
 }
 
-pub fn set_device_index(device_index: Option<usize>) {}
+pub fn set_device_index(device_index: Option<usize>) {
+    if let Some(device_index) = device_index {
+        GPU_DEVICE_START_INDEX.store(device_index, Ordering::Relaxed);
+    }
+}
 
-pub fn set_devices_count(devices_count: Option<usize>) {}
+pub fn set_devices_count(devices_count: Option<usize>) {
+    if let Some(devices_count) = devices_count {
+        GPU_DEVICES_COUNT.store(devices_count, Ordering::Relaxed);
+    }
+}
 
 pub fn set_device_filter(device_filter: &str) {
     let mut filter = GPU_DEVICE_FILER.lock();

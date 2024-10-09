@@ -19,10 +19,9 @@ use crate::vector_storage::{RawScorer, VectorStorageEnum};
 
 #[allow(clippy::too_many_arguments)]
 pub fn build_hnsw_on_gpu<'a>(
-    create_new_device: bool,
+    device: Arc<gpu::Device>,
     pool: &ThreadPool,
     reference_graph: &GraphLayersBuilder,
-    debug_messenger: Option<&dyn gpu::DebugMessenger>,
     max_groups_count: usize,
     vector_storage: &VectorStorageEnum,
     quantized_storage: Option<&QuantizedVectors>,
@@ -44,8 +43,7 @@ pub fn build_hnsw_on_gpu<'a>(
     let ef = reference_graph.ef_construct;
 
     let gpu_search_context = Arc::new(Mutex::new(GpuSearchContext::new(
-        create_new_device,
-        debug_messenger,
+        device,
         max_groups_count,
         vector_storage,
         quantized_storage,
@@ -200,13 +198,17 @@ mod tests {
             .unwrap();
 
         let debug_messenger = gpu::PanicIfErrorMessenger {};
+        let instance =
+            Arc::new(gpu::Instance::new("qdrant", Some(&debug_messenger), false).unwrap());
+        let device = Arc::new(
+            gpu::Device::new(instance.clone(), instance.vk_physical_devices[0].clone()).unwrap(),
+        );
 
         let ids = (0..num_vectors as PointOffsetType).collect();
         build_hnsw_on_gpu(
-            true,
+            device,
             &pool,
             &test.graph_layers_builder,
-            Some(&debug_messenger),
             groups_count,
             &test.vector_storage.borrow(),
             None,

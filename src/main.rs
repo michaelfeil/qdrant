@@ -159,6 +159,10 @@ fn main() -> anyhow::Result<()> {
         segment::index::hnsw_index::gpu::set_device_index(settings_gpu.device_index);
         segment::index::hnsw_index::gpu::set_devices_count(settings_gpu.devices_count);
         segment::index::hnsw_index::gpu::set_device_filter(&settings_gpu.device_filter);
+        // initialize GPU devices
+        let _ = segment::index::hnsw_index::gpu::GPU_DEVICES_MANAGER
+            .as_ref()
+            .map(|devices_manager| devices_manager.lock_device());
     }
 
     welcome(&settings);

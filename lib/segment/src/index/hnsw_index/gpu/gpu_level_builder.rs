@@ -106,6 +106,7 @@ fn gpu_batched_apply_entries(batch: &Batch, new_entries: Vec<PointOffsetType>) {
 #[cfg(test)]
 mod tests {
     use std::borrow::Borrow;
+    use std::sync::Arc;
 
     use common::types::PointOffsetType;
 
@@ -136,9 +137,13 @@ mod tests {
             create_graph_layers_builder(&batched_points, num_vectors, m, m0, ef, 1).unwrap();
 
         let debug_messenger = gpu::PanicIfErrorMessenger {};
+        let instance =
+            Arc::new(gpu::Instance::new("qdrant", Some(&debug_messenger), false).unwrap());
+        let device = Arc::new(
+            gpu::Device::new(instance.clone(), instance.vk_physical_devices[0].clone()).unwrap(),
+        );
         let mut gpu_search_context = GpuSearchContext::new(
-            true,
-            Some(&debug_messenger),
+            device,
             groups_count,
             &test.vector_storage.borrow(),
             None,
