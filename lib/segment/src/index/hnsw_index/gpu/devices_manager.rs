@@ -58,6 +58,11 @@ impl DevicesMaganer {
                     });
                 }
             }
+
+            if !self.wait_free {
+                return None;
+            }
+
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
     }
