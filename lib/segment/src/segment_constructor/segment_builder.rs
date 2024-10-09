@@ -447,11 +447,15 @@ impl SegmentBuilder {
             payload_index.flusher()()?;
             let payload_index_arc = Arc::new(AtomicRefCell::new(payload_index));
 
-            let gpu_device = crate::index::hnsw_index::gpu::GPU_DEVICES_MANAGER
-                .as_ref()
-                .map(|devices_manager| devices_manager.lock_device())
-                .ok()
-                .flatten();
+            let gpu_device = if crate::index::hnsw_index::gpu::get_gpu_indexing() {
+                crate::index::hnsw_index::gpu::GPU_DEVICES_MANAGER
+                    .as_ref()
+                    .map(|devices_manager| devices_manager.lock_device())
+                    .ok()
+                    .flatten()
+            } else {
+                None
+            };
             if let Some(_gpu_device) = &gpu_device {
                 if permit.num_cpus > 1 {
                     permit.release_count(permit.num_cpus - 1);
