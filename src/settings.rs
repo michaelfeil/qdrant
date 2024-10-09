@@ -144,6 +144,8 @@ pub struct GpuConfig {
     pub device_filter: String,
     #[serde(default)]
     pub min_points: Option<usize>,
+    #[serde(default)]
+    pub wait_free: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Clone, Validate)]

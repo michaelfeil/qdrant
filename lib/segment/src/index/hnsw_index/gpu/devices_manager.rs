@@ -6,6 +6,7 @@ use crate::common::operation_error::OperationResult;
 
 pub struct DevicesMaganer {
     pub devices: Vec<Mutex<Arc<gpu::Device>>>,
+    pub wait_free: bool,
 }
 
 pub struct LockedDevice<'a> {
@@ -18,6 +19,7 @@ impl DevicesMaganer {
         filter: &str,
         start_index: usize,
         count: usize,
+        wait_free: bool,
     ) -> OperationResult<Self> {
         let filter = filter.to_lowercase();
         let devices = instance
@@ -40,7 +42,7 @@ impl DevicesMaganer {
                 }
             })
             .collect::<Vec<_>>();
-        Ok(Self { devices })
+        Ok(Self { devices, wait_free })
     }
 
     pub fn lock_device(&self) -> Option<LockedDevice> {

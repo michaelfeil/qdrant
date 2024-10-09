@@ -18,7 +18,6 @@ use rand::thread_rng;
 use rayon::prelude::*;
 use rayon::ThreadPool;
 
-use super::gpu::devices_manager::LockedDevice;
 use super::gpu::get_gpu_min_points_count;
 use super::graph_links::{GraphLinks, GraphLinksMmap};
 use crate::common::operation_error::{check_process_stopped, OperationError, OperationResult};
@@ -95,6 +94,7 @@ pub struct HnswIndexOpenArgs<'a> {
     pub payload_index: Arc<AtomicRefCell<StructPayloadIndex>>,
     pub hnsw_config: HnswConfig,
     pub permit: Option<Arc<CpuPermit>>,
+    pub gpu_device: Option<Arc<gpu::Device>>,
     pub stopped: &'a AtomicBool,
 }
 
@@ -108,6 +108,7 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
             payload_index,
             hnsw_config,
             permit,
+            gpu_device,
             stopped,
         } = args;
 
@@ -166,6 +167,7 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
                 &payload_index.borrow(),
                 hnsw_config,
                 num_cpus,
+                gpu_device,
                 stopped,
             )?;
 
@@ -212,6 +214,7 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
         payload_index: &StructPayloadIndex,
         hnsw_config: HnswConfig,
         num_cpus: usize,
+        gpu_device: Option<Arc<gpu::Device>>,
         stopped: &AtomicBool,
     ) -> OperationResult<(HnswGraphConfig, GraphLayers<TGraphLinks>)> {
         let total_vector_count = vector_storage.total_vector_count();
@@ -258,12 +261,6 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
             num_entries,
             HNSW_USE_HEURISTIC,
         );
-
-        let gpu_device = crate::index::hnsw_index::gpu::GPU_DEVICES_MANAGER
-            .as_ref()
-            .map(|device_manager| device_manager.lock_device())
-            .ok()
-            .flatten();
 
         let pool = rayon::ThreadPoolBuilder::new()
             .thread_name(|idx| format!("hnsw-build-{idx}"))
@@ -330,7 +327,7 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
                     };
 
                     Some(build_hnsw_on_gpu(
-                        gpu_device.locked_device.clone(),
+                        gpu_device.clone(),
                         &pool,
                         &graph_layers_builder,
                         get_gpu_max_groups(),
@@ -449,7 +446,7 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
                         quantized_vectors,
                         payload_index,
                         &pool,
-                        &gpu_device,
+                        gpu_device.clone(),
                         stopped,
                         &mut additional_graph,
                         payload_block.condition,
@@ -494,7 +491,7 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
         quantized_vectors: &Option<QuantizedVectors>,
         payload_index: &StructPayloadIndex,
         pool: &ThreadPool,
-        gpu_device: &Option<LockedDevice>,
+        gpu_device: Option<Arc<gpu::Device>>,
         stopped: &AtomicBool,
         graph_layers_builder: &mut GraphLayersBuilder,
         condition: FieldCondition,
@@ -549,7 +546,7 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
                     Ok((raw_scorer, Some(block_condition_checker)))
                 };
                 Some(build_hnsw_on_gpu(
-                    gpu_device.locked_device.clone(),
+                    gpu_device.clone(),
                     &pool,
                     &graph_layers_builder,
                     get_gpu_max_groups(),

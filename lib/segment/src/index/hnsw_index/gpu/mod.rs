@@ -31,6 +31,7 @@ lazy_static! {
 }
 
 static GPU_INDEXING: AtomicBool = AtomicBool::new(false);
+static GPU_WAIT_FREE: AtomicBool = AtomicBool::new(true);
 static GPU_FORCE_HALF_PRECISION: AtomicBool = AtomicBool::new(false);
 static GPU_MAX_GROUPS: AtomicUsize = AtomicUsize::new(GPU_MAX_GROUPS_COUNT_DEFAULT);
 pub const GPU_MAX_GROUPS_COUNT_DEFAULT: usize = 512;
@@ -55,6 +56,7 @@ fn init_devices_manager() -> OperationResult<DevicesMaganer> {
         &filter,
         GPU_DEVICE_START_INDEX.load(Ordering::Relaxed),
         GPU_DEVICES_COUNT.load(Ordering::Relaxed),
+        GPU_WAIT_FREE.load(Ordering::Relaxed),
     )?;
     Ok(devices_manager)
 }
@@ -83,6 +85,10 @@ pub fn set_gpu_indexing(gpu_indexing: bool) {
 
 pub fn get_gpu_indexing() -> bool {
     GPU_INDEXING.load(Ordering::Relaxed)
+}
+
+pub fn set_wait_free(wait_free: bool) {
+    GPU_WAIT_FREE.store(wait_free, Ordering::Relaxed);
 }
 
 pub fn set_gpu_force_half_precision(force_half_precision: bool) {
