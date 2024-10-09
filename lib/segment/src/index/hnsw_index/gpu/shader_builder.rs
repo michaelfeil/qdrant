@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::gpu_vector_storage::{GpuVectorStorage, GpuVectorStorageElementType};
+use crate::index::hnsw_index::gpu::gpu_vector_storage::GpuQuantizationParams;
 use crate::types::Distance;
 
 pub struct ShaderBuilder<'a> {
@@ -199,12 +200,15 @@ impl<'a> ShaderBuilder<'a> {
                 Distance::Manhattan => options.add_macro_definition("MANHATTAN_DISTANCE", None),
             }
 
-            if let Some(sq_multiplier) = gpu_vector_storage.sq_multiplier {
-                options.add_macro_definition("SQ_MULTIPLIER", Some(&sq_multiplier.to_string()));
-            }
-
-            if let Some(sq_diff) = gpu_vector_storage.sq_diff {
-                options.add_macro_definition("SQ_DIFF", Some(&sq_diff.to_string()));
+            match &gpu_vector_storage.quantization {
+                Some(GpuQuantizationParams::Scalar(scalar)) => {
+                    options.add_macro_definition(
+                        "SQ_MULTIPLIER",
+                        Some(&scalar.multiplier.to_string()),
+                    );
+                    options.add_macro_definition("SQ_DIFF", Some(&scalar.diff.to_string()));
+                }
+                _ => {}
             }
 
             options.add_macro_definition("DIM", Some(&gpu_vector_storage.dim.to_string()));

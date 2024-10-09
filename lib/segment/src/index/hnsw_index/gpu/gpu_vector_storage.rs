@@ -35,8 +35,16 @@ pub struct GpuVectorStorage {
     pub count: usize,
     pub element_type: GpuVectorStorageElementType,
     pub distance: Distance,
-    pub sq_multiplier: Option<f32>,
-    pub sq_diff: Option<f32>,
+    pub quantization: Option<GpuQuantizationParams>,
+}
+
+pub enum GpuQuantizationParams {
+    Scalar(GpuScalarQuantizationParams),
+}
+
+pub struct GpuScalarQuantizationParams {
+    pub multiplier: f32,
+    pub diff: f32,
 }
 
 impl GpuVectorStorage {
@@ -79,8 +87,10 @@ impl GpuVectorStorage {
                         let (offset, _) = quantized_storage.get_quantized_vector(id);
                         offset
                     })),
-                    Some(quantized_storage.get_multiplier()),
-                    Some(quantized_storage.get_diff()),
+                    Some(GpuQuantizationParams::Scalar(GpuScalarQuantizationParams {
+                        multiplier: quantized_storage.get_multiplier(),
+                        diff: quantized_storage.get_diff(),
+                    })),
                 )
             }
             QuantizedVectorStorage::ScalarMmap(quantized_storage) => {
@@ -97,8 +107,10 @@ impl GpuVectorStorage {
                         let (offset, _) = quantized_storage.get_quantized_vector(id);
                         offset
                     })),
-                    Some(quantized_storage.get_multiplier()),
-                    Some(quantized_storage.get_diff()),
+                    Some(GpuQuantizationParams::Scalar(GpuScalarQuantizationParams {
+                        multiplier: quantized_storage.get_multiplier(),
+                        diff: quantized_storage.get_diff(),
+                    })),
                 )
             }
             QuantizedVectorStorage::PQRam(_) => {
@@ -118,7 +130,6 @@ impl GpuVectorStorage {
                     |id| Cow::Borrowed(quantized_storage.get_quantized_vector(id)),
                     None,
                     None,
-                    None,
                 )
             }
             QuantizedVectorStorage::BinaryMmap(quantized_storage) => {
@@ -128,7 +139,6 @@ impl GpuVectorStorage {
                     vector_storage.distance(),
                     vector_storage.total_vector_count(),
                     |id| Cow::Borrowed(quantized_storage.get_quantized_vector(id)),
-                    None,
                     None,
                     None,
                 )
@@ -162,7 +172,6 @@ impl GpuVectorStorage {
                         },
                         None,
                         None,
-                        None,
                     )
                 } else {
                     Self::new_typed::<VectorElementType>(
@@ -171,7 +180,6 @@ impl GpuVectorStorage {
                         vector_storage.distance(),
                         vector_storage.total_vector_count(),
                         |id| Cow::Borrowed(vector_storage.get_dense(id)),
-                        None,
                         None,
                         None,
                     )
@@ -186,7 +194,6 @@ impl GpuVectorStorage {
                     |id| Cow::Borrowed(vector_storage.get_dense(id)),
                     None,
                     None,
-                    None,
                 )
             }
             VectorStorageEnum::DenseSimpleHalf(vector_storage) => {
@@ -196,7 +203,6 @@ impl GpuVectorStorage {
                     vector_storage.distance(),
                     vector_storage.total_vector_count(),
                     |id| Cow::Borrowed(vector_storage.get_dense(id)),
-                    None,
                     None,
                     None,
                 )
@@ -215,7 +221,6 @@ impl GpuVectorStorage {
                         },
                         None,
                         None,
-                        None,
                     )
                 } else {
                     Self::new_typed::<VectorElementType>(
@@ -224,7 +229,6 @@ impl GpuVectorStorage {
                         vector_storage.distance(),
                         vector_storage.total_vector_count(),
                         |id| Cow::Borrowed(vector_storage.get_dense(id)),
-                        None,
                         None,
                         None,
                     )
@@ -239,7 +243,6 @@ impl GpuVectorStorage {
                     |id| Cow::Borrowed(vector_storage.get_dense(id)),
                     None,
                     None,
-                    None,
                 )
             }
             VectorStorageEnum::DenseMemmapHalf(vector_storage) => {
@@ -249,7 +252,6 @@ impl GpuVectorStorage {
                     vector_storage.distance(),
                     vector_storage.total_vector_count(),
                     |id| Cow::Borrowed(vector_storage.get_dense(id)),
-                    None,
                     None,
                     None,
                 )
@@ -268,7 +270,6 @@ impl GpuVectorStorage {
                         },
                         None,
                         None,
-                        None,
                     )
                 } else {
                     Self::new_typed::<VectorElementType>(
@@ -277,7 +278,6 @@ impl GpuVectorStorage {
                         vector_storage.distance(),
                         vector_storage.total_vector_count(),
                         |id| Cow::Borrowed(vector_storage.get_dense(id)),
-                        None,
                         None,
                         None,
                     )
@@ -292,7 +292,6 @@ impl GpuVectorStorage {
                     |id| Cow::Borrowed(vector_storage.get_dense(id)),
                     None,
                     None,
-                    None,
                 )
             }
             VectorStorageEnum::DenseAppendableMemmapHalf(vector_storage) => {
@@ -302,7 +301,6 @@ impl GpuVectorStorage {
                     vector_storage.distance(),
                     vector_storage.total_vector_count(),
                     |id| Cow::Borrowed(vector_storage.get_dense(id)),
-                    None,
                     None,
                     None,
                 )
@@ -321,7 +319,6 @@ impl GpuVectorStorage {
                         },
                         None,
                         None,
-                        None,
                     )
                 } else {
                     Self::new_typed::<VectorElementType>(
@@ -330,7 +327,6 @@ impl GpuVectorStorage {
                         vector_storage.distance(),
                         vector_storage.total_vector_count(),
                         |id| Cow::Borrowed(vector_storage.get_dense(id)),
-                        None,
                         None,
                         None,
                     )
@@ -345,7 +341,6 @@ impl GpuVectorStorage {
                     |id| Cow::Borrowed(vector_storage.get_dense(id)),
                     None,
                     None,
-                    None,
                 )
             }
             VectorStorageEnum::DenseAppendableInRamHalf(vector_storage) => {
@@ -355,7 +350,6 @@ impl GpuVectorStorage {
                     vector_storage.distance(),
                     vector_storage.total_vector_count(),
                     |id| Cow::Borrowed(vector_storage.get_dense(id)),
-                    None,
                     None,
                     None,
                 )
@@ -384,8 +378,7 @@ impl GpuVectorStorage {
         count: usize,
         get_vector: impl Fn(PointOffsetType) -> Cow<'a, [TElement]>,
         get_sq_offset: Option<Box<dyn Fn(PointOffsetType) -> f32 + 'a>>,
-        sq_multiplier: Option<f32>,
-        sq_diff: Option<f32>,
+        quantization: Option<GpuQuantizationParams>,
     ) -> gpu::GpuResult<Self> {
         let timer = std::time::Instant::now();
 
@@ -552,8 +545,7 @@ impl GpuVectorStorage {
             count,
             element_type,
             distance,
-            sq_multiplier,
-            sq_diff,
+            quantization,
         })
     }
 
