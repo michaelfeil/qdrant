@@ -7,14 +7,14 @@ use crate::types::Distance;
 pub struct ShaderBuilder<'a> {
     device: Arc<gpu::Device>,
     shader_code: String,
-//    element_type: Option<GpuVectorStorageElementType>,
-//    distance: Option<Distance>,
-//    sq_multiplier: Option<f32>,
-//    sq_diff: Option<f32>,
+    //    element_type: Option<GpuVectorStorageElementType>,
+    //    distance: Option<Distance>,
+    //    sq_multiplier: Option<f32>,
+    //    sq_diff: Option<f32>,
     exact: Option<bool>,
-//    dim: Option<usize>,
-//    storages_count: Option<usize>,
-//    storage_size: Option<usize>,
+    //    dim: Option<usize>,
+    //    storages_count: Option<usize>,
+    //    storage_size: Option<usize>,
     nearest_heap_ef: Option<usize>,
     nearest_heap_capacity: Option<usize>,
     candidates_heap_capacity: Option<usize>,
@@ -121,7 +121,10 @@ impl<'a> ShaderBuilder<'a> {
         self
     }
 
-    pub fn with_gpu_vector_storage(&mut self, gpu_vector_storage: &'a GpuVectorStorage) -> &mut Self {
+    pub fn with_gpu_vector_storage(
+        &mut self,
+        gpu_vector_storage: &'a GpuVectorStorage,
+    ) -> &mut Self {
         self.gpu_vector_storage = Some(gpu_vector_storage);
         self
     }
@@ -199,7 +202,7 @@ impl<'a> ShaderBuilder<'a> {
             if let Some(sq_multiplier) = gpu_vector_storage.sq_multiplier {
                 options.add_macro_definition("SQ_MULTIPLIER", Some(&sq_multiplier.to_string()));
             }
-    
+
             if let Some(sq_diff) = gpu_vector_storage.sq_diff {
                 options.add_macro_definition("SQ_DIFF", Some(&sq_diff.to_string()));
             }
