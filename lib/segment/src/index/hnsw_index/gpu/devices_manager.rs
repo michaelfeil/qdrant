@@ -20,28 +20,35 @@ impl DevicesMaganer {
         start_index: usize,
         count: usize,
         wait_free: bool,
+        parallel_indexes: usize,
     ) -> OperationResult<Self> {
         let filter = filter.to_lowercase();
-        let devices = instance
-            .vk_physical_devices
-            .iter()
-            .filter(|device| {
-                let device_name = device.name.to_lowercase();
-                device_name.contains(&filter)
-            })
-            .cloned()
-            .skip(start_index)
-            .take(count)
-            .filter_map(|physical_device| {
-                if let Some(device) = gpu::Device::new(instance.clone(), physical_device.clone()) {
-                    log::info!("Initialized GPU device: {:?}", &physical_device.name);
-                    Some(Mutex::new(Arc::new(device)))
-                } else {
-                    log::error!("Failed to create GPU device: {:?}", &physical_device.name);
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
+        let mut devices = Vec::new();
+        for _ in 0..parallel_indexes {
+            devices.extend(
+                instance
+                    .vk_physical_devices
+                    .iter()
+                    .filter(|device| {
+                        let device_name = device.name.to_lowercase();
+                        device_name.contains(&filter)
+                    })
+                    .cloned()
+                    .skip(start_index)
+                    .take(count)
+                    .filter_map(|physical_device| {
+                        if let Some(device) =
+                            gpu::Device::new(instance.clone(), physical_device.clone())
+                        {
+                            log::info!("Initialized GPU device: {:?}", &physical_device.name);
+                            Some(Mutex::new(Arc::new(device)))
+                        } else {
+                            log::error!("Failed to create GPU device: {:?}", &physical_device.name);
+                            None
+                        }
+                    }),
+            );
+        }
         Ok(Self { devices, wait_free })
     }
 

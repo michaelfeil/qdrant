@@ -146,6 +146,8 @@ pub struct GpuConfig {
     pub min_points: Option<usize>,
     #[serde(default)]
     pub wait_free: Option<bool>,
+    #[serde(default)]
+    pub parallel_indexes: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Clone, Validate)]

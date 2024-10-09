@@ -38,6 +38,7 @@ pub const GPU_MAX_GROUPS_COUNT_DEFAULT: usize = 512;
 static GPU_MIN_POINTS_COUNT: AtomicUsize = AtomicUsize::new(10_000);
 static GPU_DEVICE_START_INDEX: AtomicUsize = AtomicUsize::new(0);
 static GPU_DEVICES_COUNT: AtomicUsize = AtomicUsize::new(usize::MAX);
+static GPU_PARALLEL_INDEXES: AtomicUsize = AtomicUsize::new(0);
 
 fn create_gpu_instance() -> OperationResult<Arc<gpu::Instance>> {
     Ok(Arc::new(
@@ -57,6 +58,7 @@ fn init_devices_manager() -> OperationResult<DevicesMaganer> {
         GPU_DEVICE_START_INDEX.load(Ordering::Relaxed),
         GPU_DEVICES_COUNT.load(Ordering::Relaxed),
         GPU_WAIT_FREE.load(Ordering::Relaxed),
+        GPU_PARALLEL_INDEXES.load(Ordering::Relaxed),
     )?;
     Ok(devices_manager)
 }
@@ -124,6 +126,10 @@ pub fn set_devices_count(devices_count: Option<usize>) {
 pub fn set_device_filter(device_filter: &str) {
     let mut filter = GPU_DEVICE_FILER.lock();
     *filter = device_filter.to_string();
+}
+
+pub fn set_gpu_parallel_indexes(parallel_indexes: usize) {
+    GPU_PARALLEL_INDEXES.store(parallel_indexes, Ordering::Relaxed);
 }
 
 pub fn get_gpu_min_points_count() -> usize {
