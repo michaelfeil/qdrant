@@ -46,7 +46,7 @@ impl Context {
         let vk_command_pool;
         let vk_fence;
         {
-            queue = device.compute_queues[0].clone();
+            queue = device.compute_queues[device.queue_index % device.compute_queues.len()].clone();
 
             let command_pool_create_info = vk::CommandPoolCreateInfo::builder()
                 .queue_family_index(queue.vk_queue_family_index as u32)

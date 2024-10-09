@@ -28,10 +28,19 @@ pub struct Device {
     pub max_compute_work_group_size: [usize; 3],
     pub max_buffer_size: usize,
     pub compiler: shaderc::Compiler,
+    pub queue_index: usize,
 }
 
 impl Device {
     pub fn new(instance: Arc<Instance>, vk_physical_device: PhysicalDevice) -> Option<Device> {
+        Self::new_with_queue_index(instance, vk_physical_device, 0)
+    }
+
+    pub fn new_with_queue_index(
+        instance: Arc<Instance>,
+        vk_physical_device: PhysicalDevice,
+        queue_index: usize,
+    ) -> Option<Device> {
         #[allow(unused_mut)]
         let mut extensions_cstr: Vec<CString> =
             vec![CString::from(ash::vk::KhrMaintenance1Fn::name())];
@@ -213,6 +222,7 @@ impl Device {
                 max_buffer_size,
                 compiler,
                 is_dynamic_subgroup_size,
+                queue_index,
             })
         } else {
             None

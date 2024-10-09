@@ -24,7 +24,7 @@ impl DevicesMaganer {
     ) -> OperationResult<Self> {
         let filter = filter.to_lowercase();
         let mut devices = Vec::new();
-        for _ in 0..parallel_indexes {
+        for queue_index in 0..parallel_indexes {
             devices.extend(
                 instance
                     .vk_physical_devices
@@ -37,9 +37,11 @@ impl DevicesMaganer {
                     .skip(start_index)
                     .take(count)
                     .filter_map(|physical_device| {
-                        if let Some(device) =
-                            gpu::Device::new(instance.clone(), physical_device.clone())
-                        {
+                        if let Some(device) = gpu::Device::new_with_queue_index(
+                            instance.clone(),
+                            physical_device.clone(),
+                            queue_index,
+                        ) {
                             log::info!("Initialized GPU device: {:?}", &physical_device.name);
                             Some(Mutex::new(Arc::new(device)))
                         } else {
