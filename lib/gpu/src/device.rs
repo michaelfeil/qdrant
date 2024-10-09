@@ -15,6 +15,7 @@ pub struct Queue {
 }
 
 pub struct Device {
+    pub name: String,
     pub instance: Arc<Instance>,
     pub vk_device: ash::Device,
     pub vk_physical_device: vk::PhysicalDevice,
@@ -200,6 +201,7 @@ impl Device {
 
             let compiler = shaderc::Compiler::new().unwrap();
             Some(Device {
+                name: vk_physical_device.name.clone(),
                 instance: instance.clone(),
                 vk_device,
                 vk_physical_device: vk_physical_device.vk_physical_device,

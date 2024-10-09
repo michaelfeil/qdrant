@@ -201,8 +201,10 @@ impl CpuPermit {
             self.num_cpus -= release_count;
             let permit = self.permit.take();
             self.permit = permit
-                .map(|mut permit| permit.split(release_count as usize))
+                .map(|mut permit| permit.split(self.num_cpus as usize))
                 .flatten();
+        } else {
+            self.release();
         }
     }
 }
