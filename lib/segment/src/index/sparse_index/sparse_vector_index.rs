@@ -281,6 +281,7 @@ impl<TInvertedIndex: InvertedIndex> SparseVectorIndex<TInvertedIndex> {
         top: usize,
         prefiltered_points: &mut Option<Vec<PointOffsetType>>,
         vector_query_context: &VectorQueryContext,
+        hardware_counter: &HardwareCounterCell,
     ) -> OperationResult<Vec<ScoredPointOffset>> {
         let vector_storage = self.vector_storage.borrow();
         let id_tracker = self.id_tracker.borrow();
@@ -307,9 +308,15 @@ impl<TInvertedIndex: InvertedIndex> SparseVectorIndex<TInvertedIndex> {
                         prefiltered_points.as_ref().unwrap().iter().copied()
                     }
                 };
-                Ok(raw_scorer.peek_top_iter(&mut filtered_points, top))
+                let res = raw_scorer.peek_top_iter(&mut filtered_points, top);
+                hardware_counter.apply_from(&raw_scorer.hardware_counter());
+                Ok(res)
             }
-            None => Ok(raw_scorer.peek_top_all(top)),
+            None => {
+                let res = raw_scorer.peek_top_all(top);
+                hardware_counter.apply_from(&raw_scorer.hardware_counter());
+                Ok(res)
+            }
         }
     }
 
@@ -366,6 +373,7 @@ impl<TInvertedIndex: InvertedIndex> SparseVectorIndex<TInvertedIndex> {
         filter: Option<&Filter>,
         top: usize,
         vector_query_context: &VectorQueryContext,
+        hardware_counter: &HardwareCounterCell,
     ) -> Vec<ScoredPointOffset> {
         let vector_storage = self.vector_storage.borrow();
         let id_tracker = self.id_tracker.borrow();
@@ -397,9 +405,15 @@ impl<TInvertedIndex: InvertedIndex> SparseVectorIndex<TInvertedIndex> {
                 let matches_filter_condition = |idx: PointOffsetType| -> bool {
                     not_deleted_condition(idx) && filter_context.check(idx)
                 };
-                search_context.search(&matches_filter_condition)
+                let res = search_context.search(&matches_filter_condition);
+                hardware_counter.apply_from(search_context.hardware_counter());
+                res
             }
-            None => search_context.search(&not_deleted_condition),
+            None => {
+                let res = search_context.search(&not_deleted_condition);
+                hardware_counter.apply_from(search_context.hardware_counter());
+                res
+            }
         }
     }
 
@@ -440,12 +454,26 @@ impl<TInvertedIndex: InvertedIndex> SparseVectorIndex<TInvertedIndex> {
                 } else {
                     let _timer =
                         ScopeDurationMeasurer::new(&self.searches_telemetry.filtered_sparse);
-                    Ok(self.search_sparse(&vector, Some(filter), top, vector_query_context))
+                    Ok(self.search_sparse(
+                        &vector,
+                        Some(filter),
+                        top,
+                        vector_query_context,
+                        hardware_counter,
+                    ))
                 }
             }
             None => {
                 let _timer = ScopeDurationMeasurer::new(&self.searches_telemetry.unfiltered_sparse);
-                Ok(self.search_sparse(&vector, filter, top, vector_query_context))
+                Ok(
+                    self.search_sparse(
+                        &vector,
+                        filter,
+                        top,
+                        vector_query_context,
+                        hardware_counter,
+                    ),
+                )
             }
         }
     }
@@ -484,6 +512,7 @@ impl<TInvertedIndex: InvertedIndex> SparseVectorIndex<TInvertedIndex> {
                     top,
                     prefiltered_points,
                     vector_query_context,
+                    hardware_counter,
                 )
             }
         }

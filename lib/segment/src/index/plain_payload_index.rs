@@ -279,7 +279,7 @@ impl VectorIndex for PlainIndex {
         top: usize,
         params: Option<&SearchParams>,
         query_context: &VectorQueryContext,
-        _hardware_counter: &HardwareCounterCell,
+        hardware_counter: &HardwareCounterCell,
     ) -> OperationResult<Vec<Vec<ScoredPointOffset>>> {
         let is_indexed_only = params.map(|p| p.indexed_only).unwrap_or(false);
         if is_indexed_only
@@ -313,7 +313,10 @@ impl VectorIndex for PlainIndex {
                             &is_stopped,
                         )
                         .map(|scorer| {
-                            scorer.peek_top_iter(&mut filtered_ids_vec.iter().copied(), top)
+                            let res =
+                                scorer.peek_top_iter(&mut filtered_ids_vec.iter().copied(), top);
+                            hardware_counter.apply_from(&scorer.hardware_counter());
+                            res
                         })
                     })
                     .collect()
@@ -334,7 +337,11 @@ impl VectorIndex for PlainIndex {
                             deleted_points,
                             &is_stopped,
                         )
-                        .map(|scorer| scorer.peek_top_all(top))
+                        .map(|scorer| {
+                            let res = scorer.peek_top_all(top);
+                            hardware_counter.apply_from(&scorer.hardware_counter());
+                            res
+                        })
                     })
                     .collect()
             }
